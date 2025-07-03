@@ -20,12 +20,13 @@ class Step (C : Type*) [AddCommMonoid C] (m : Type → Type v) extends Monad m w
 -- #check LawfulMonadLift
 
 /-- A type class for monads with a cost function. -/
-class MonadCost (C : outParam (Type w)) [AddMonoid C] (m : Type u → Type v) where
+class MonadCost (C : outParam (Type w)) (m : Type u → Type v) where
   cost : C → m PUnit
 
 export MonadCost (cost)
 
-class LawfulMonadCost (C : Type w) [AddMonoid C] (m : Type u → Type v) [Monad m] [MonadCost C m] where
+class LawfulMonadCost (C : outParam (Type w)) (m : Type u → Type v)
+    [AddMonoid C] [Monad m] [MonadCost C m] where
   cost_zero : cost (0 : C) = (pure PUnit.unit : m PUnit)
   cost_add {c c' : C} : (cost c >>= fun _ => cost c') = (cost (c' + c) : m PUnit)
 
