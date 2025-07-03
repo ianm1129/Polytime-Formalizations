@@ -8,8 +8,8 @@ pp.unicode.fun = true # pretty-prints `fun a ↦ b`
 autoImplicit = false
 
 [[require]]
-name = "mathlib"
-scope = "leanprover-community"
+name = "VCVio"
+git = "https://github.com/dtumad/VCV-io.git"
 
 [[lean_lib]]
 name = "«Polytime Formalizations»"

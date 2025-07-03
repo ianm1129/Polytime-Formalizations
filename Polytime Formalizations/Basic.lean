@@ -1,19 +1,44 @@
 import Mathlib.Data.PFunctor.Univariate.Basic
 import Mathlib.Algebra.Order.Monoid.Basic
+import ToMathlib.Control.Lawful.MonadState
 
-universe u v
+/-!
+  # Monad Cost
+
+  This file defines the type class `MonadCost` for monads equipped with a cost function.
+  We also define the laws that a cost function must satisfy in the `LawfulMonadCost` type class.
+-/
+
+universe u v w
 
 class Step (C : Type*) [AddCommMonoid C] (m : Type → Type v) extends Monad m where
   step : C → m PUnit
   step_0 : step 0 = pure ()
   step_add {c c'} : (step c >>= fun _ => step c') = step (c' + c)
 
---Issue: to make step 0 = pure () work, needed to remove universe level u.
+-- We want `MonadCost` to be like `MonadState` `MonadReader` `MonadLift` etc
+-- #check LawfulMonadLift
+
+/-- A type class for monads with a cost function. -/
+class MonadCost (C : outParam (Type w)) [AddMonoid C] (m : Type u → Type v) where
+  cost : C → m PUnit
+
+export MonadCost (cost)
+
+class LawfulMonadCost (C : Type w) [AddMonoid C] (m : Type u → Type v) [Monad m] [MonadCost C m] where
+  cost_zero : cost (0 : C) = (pure PUnit.unit : m PUnit)
+  cost_add {c c' : C} : (cost c >>= fun _ => cost c') = (cost (c' + c) : m PUnit)
+
+export LawfulMonadCost (cost_zero cost_add)
+
+attribute [simp] cost_zero cost_add
+
+class MonadOracle (P : PFunctor) (m : Type u → Type v) [Monad m] where
+  oracle : (a : P.A) → m (P.B a)
 
 -- class OracleCompLike (C : Type*) [AddMonoid C] (P : PFunctor)
 --     (m : Type u → Type v) extends Monad m, Step C m where
 --   oracle : (a : P.A) → m (P.B a)
-
 
 variable {P : PFunctor} {m : Type → Type} [Step Nat m]
 
