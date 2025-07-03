@@ -59,7 +59,7 @@ def idHard (n : Nat) : m Nat :=
 theorem idHardBound [LawfulMonad m] {n : Nat} : (idHard n : m Nat) = Step.step n >>= fun _ => pure n :=
   by induction n with
   | zero => simp only [idHard] ; rw [Step.step_0, pure_bind];
-  | succ n ih => simp only [ih, idHard, bind_assoc, pure_bind, Step.step_add] ;
+  | succ n ih => simp only [ih, idHard, bind_assoc, pure_bind] ;
                  rw [← bind_assoc, Step.step_add];
 
 
@@ -76,10 +76,10 @@ theorem factBound [LawfulMonad m] {n : Nat} : ∃ (z : Nat), ( fact n : m Nat) =
   by induction n with
   | zero => simp only [fact] ; rw [Step.step_0] ; existsi 1; rw [pure_bind]
   | succ n ih =>
-      simp only [ih, fact];
+      simp only [fact];
       rcases ih with ⟨z, hz⟩; rw [hz];
       existsi ((n+1) * z);
-      simp [bind_assoc, pure_bind, ← Step.step_add];
+      simp [← Step.step_add];
 
 
 
@@ -104,7 +104,7 @@ theorem insertBound [LawfulMonad m] (x : Nat) (L : List Nat) :
   | nil => simp only [cmpInsert] ;
            existsi [x] ; existsi 0;
            simp only [List.length_nil];
-           simp only [zero_add, Nat.zero_le, true_and];
+           simp only [Nat.zero_le, true_and];
            rw [Step.step_0, pure_bind]
 
   | cons y ys ih => simp only [cmpInsert] ;
@@ -116,7 +116,7 @@ theorem insertBound [LawfulMonad m] (x : Nat) (L : List Nat) :
                                       simp only [pure_bind, bind_assoc, ← Step.step_add];
                     else simp only [List.length_cons, if_neg h] ;
                          existsi y::L', (c + 1);
-                         simp only [List.length_cons, Nat.add_le_add_iff_right, hc.left, true_and];
+                         simp only [Nat.add_le_add_iff_right, hc.left, true_and];
                          simp only [pure_bind, bind_assoc, ← Step.step_add];
 
 
@@ -140,6 +140,7 @@ theorem inSortBound [LawfulMonad m] {L : List Nat} : ( ∃ L' : List Nat, ∃ c 
                     rcases ih with ⟨L', c, h⟩; rw [h.right];
                     simp only [pure_bind, bind_assoc];
                     have h := insertBound (m := m) y L' ;
+                    sorry
                     -- apply insertBound y L';
                     -- rw [insertBound y L'];
 
