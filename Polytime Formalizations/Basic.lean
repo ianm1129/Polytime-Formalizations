@@ -34,8 +34,12 @@ export LawfulMonadCost (cost_zero cost_add)
 
 attribute [simp] cost_zero cost_add
 
-class MonadOracle (P : PFunctor) (m : Type u → Type v) [Monad m] where
+/-- A type class for monads that may call an oracle, specified by a `PFunctor`. -/
+class MonadOracle (P : PFunctor) (m : Type u → Type v) where
   oracle : (a : P.A) → m (P.B a)
+
+-- What laws should we have for `MonadOracle`?
+-- class LawfulMonadOracle (P : PFunctor) (m : Type u → Type v) [Monad m] [MonadOracle P m] where
 
 -- class OracleCompLike (C : Type*) [AddMonoid C] (P : PFunctor)
 --     (m : Type u → Type v) extends Monad m, Step C m where
