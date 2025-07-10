@@ -1,7 +1,8 @@
 import Mathlib.Data.PFunctor.Univariate.Basic
 import Mathlib.Algebra.Order.Monoid.Basic
 import ToMathlib.Control.Lawful.MonadState
-
+import ToMathlib.Control.AlternativeMonad
+import Mathlib.Data.Real.Basic
 
 /-!
   # Monad Cost
@@ -19,8 +20,35 @@ class Step (C : Type*) [AddCommMonoid C] (m : Type u → Type v) extends Monad m
 
 export Step (step step_0 step_add)
 
+-- define a preorder? on the monad based on the cost
+-- so more step is larger
+
+-- class IsBounded
+-- or `HasCost`
+
+-- More effects:
+-- - State
+-- - Prob. sampling / choice
+-- - Non-determinism (special case of choice)
+-- - Higher-order functions
+-- - Oracle queries
+
 -- We want `MonadCost` to be like `MonadState` `MonadReader` `MonadLift` etc
 -- #check LawfulMonadLift
+
+#check MonadState
+#check LawfulMonadState
+
+-- or `MonadNonDet`
+class MonadBranch (m : Type u → Type v) where
+  branch {α : Type u} : m α → m α → m α
+
+#check AlternativeMonad
+
+-- #check unitInterval
+
+class MonadProb (m : Type u → Type v) where
+  flip {α} : Set.Icc (0 : Rat) 1 → m α → m α → m α
 
 /-- A type class for monads with a cost function. -/
 class MonadCost (C : outParam (Type w)) (m : Type u → Type v) where
@@ -134,7 +162,6 @@ theorem insertBound [LawfulMonad m] (cmp : α → α → Ordering) (x : α) (L :
                             simp only [pure_bind, bind_assoc, ← step_add, List.length_cons];
                             rw [and_true]; rw [hc.right.left];
 
-
 theorem inSortBound [LawfulMonad m] {cmp : α → α → Ordering} {L : List α} :
                                     ( ∃ L' : List α, ∃ c : Nat, c ≤ (List.length L)*(List.length L) ∧ List.length L = List.length L'∧
                                                     (inSort cmp L : m (List α)) = step c >>= fun _ => pure L') :=
@@ -155,14 +182,14 @@ theorem inSortBound [LawfulMonad m] {cmp : α → α → Ordering} {L : List α}
                     omega;
 
 
-def merge (cmp : α → α → Ordering) (L : List α) (R : List α) : m (List α) :=
+def merge (cmp : α → α → m Ordering) (L : List α) (R : List α) : m (List α) :=
   match L, R with
     | [], [] => pure ([])
     | x::xs, [] => pure (x::xs)
     | [], y::ys => pure (y::ys)
     | x::xs, y::ys => do
                         let _ ← step (1 : Nat)
-                        match cmp x y with
+                        match ← cmp x y with
                           | Ordering.lt =>
                             let M ← merge cmp (x::xs) ys
                             pure (y::M)
@@ -171,29 +198,30 @@ def merge (cmp : α → α → Ordering) (L : List α) (R : List α) : m (List �
                             pure (x::M)
 
 --Get the first half of the list
-def first (L : List α) : m (List α) :=
-  let n := List.length L ;
-  let L' := List.take (n/2) L;
-  do let _ ← step (0 : Nat)
-     pure L'
+-- def first (L : List α) : List α :=
+--   let n := List.length L ;
+--   let L' := List.take (n/2) L;
+--   L'
 
 --Get the second half of the list
-def last (L : List α) : m (List α) :=
-  let n := List.length L;
-  let L' := List.drop (n/2) L;
-  pure L'
+-- def last (L : List α) : List α :=
+--   let n := List.length L;
+--   let L' := List.drop (n/2) L;
+--   pure L'
 
-meta def mSort (cmp : α → α → Ordering) (L : List α) : m (List α):=
+def mSort (cmp : α → α → m Ordering) (L : List α) : m (List α) :=
   match L with
     | [] => pure ([])
-    | _ => do let left ← first L
-              let right ← last L
+    | _ => do let half := L.length / 2
+              let ⟨left, right⟩ := L.splitAt half
               let lsort ← (mSort cmp left)
               let rsort ← (mSort cmp right)
               let merged ← (merge cmp lsort rsort)
               pure (merged)
+termination_by L.length
+decreasing_by sorry; sorry
 
-theorem mergeBound [LawfulMonad m] {cmp : α → α → Ordering} (L : List α) (R : List α) :
+theorem mergeBound [LawfulMonad m] {cmp : α → α → m Ordering} (L : List α) (R : List α) :
                    (∃ L' : List α, ∃ c : Nat, c ≤ List.length L + List.length R ∧
                    ((merge cmp L R) : m (List α)) = step c >>= fun _ => pure L') :=
 
@@ -237,3 +265,6 @@ theorem mergeBound [LawfulMonad m] {cmp : α → α → Ordering} (L : List α) 
 -- instrument with oracle computation framework
 
 -- look for cslib on lean chat in zulip?
+
+-- TODO: Implement mergeSort with proper termination proof
+-- This would require more complex termination arguments than the simple examples above
