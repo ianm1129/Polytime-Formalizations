@@ -17,6 +17,8 @@ class Step (C : Type*) [AddCommMonoid C] (m : Type u → Type v) extends Monad m
   step_0 : step (0 : C) = (pure PUnit.unit : m PUnit)
   step_add {c c'} : (step c >>= fun _ => step c') = step (c' + c)
 
+export Step (step step_0 step_add)
+
 -- We want `MonadCost` to be like `MonadState` `MonadReader` `MonadLift` etc
 -- #check LawfulMonadLift
 
@@ -52,65 +54,57 @@ def idHard (n : Nat) : m Nat :=
   match n with
   | 0 => pure 0
   | n + 1 => do
-    let _ ← Step.step (1 : Nat)
+    let _ ← step (1 : Nat)
     let n' ← idHard n
     pure (n' + 1)
 
-
-theorem idHardBound [LawfulMonad m] {n : Nat} : (idHard n : m Nat) = Step.step n >>= fun _ => pure n :=
+theorem idHardBound [LawfulMonad m] {n : Nat} : (idHard n : m Nat) = step n >>= fun _ => pure n :=
   by induction n with
-  | zero => simp only [idHard] ; rw [Step.step_0, pure_bind];
+  | zero => simp only [idHard] ; rw [step_0, pure_bind];
   | succ n ih => simp only [ih, idHard, bind_assoc, pure_bind] ;
-                 rw [← bind_assoc, Step.step_add];
+                 rw [← bind_assoc, step_add];
 
 
 def fact (n : Nat) : m Nat :=
   match n with
   | 0 => pure 1
   | n + 1 => do
-    let _ ← Step.step (1 : Nat)
+    let _ ← step (1 : Nat)
     let n' ← fact n
     pure ((n+1) * n')
 
-theorem factBound [LawfulMonad m] {n : Nat} : ∃ (z : Nat), ( fact n : m Nat) = Step.step n >>= fun _ => pure z :=
+theorem factBound [LawfulMonad m] {n : Nat} : ∃ (z : Nat), ( fact n : m Nat) = step n >>= fun _ => pure z :=
   by induction n with
-  | zero => simp only [fact] ; rw [Step.step_0] ; existsi 1; rw [pure_bind]
+  | zero => simp only [fact] ; rw [step_0] ; existsi 1; rw [pure_bind]
   | succ n ih =>
       simp only [fact];
       rcases ih with ⟨z, hz⟩; rw [hz];
       existsi ((n+1) * z);
-      simp [← Step.step_add];
+      simp [← step_add];
 
+variable {α : Type}
 
-
-variable (α : Type)
-
-inductive Order where
-        | LESS : Order
-        | GREATER : Order
-        | EQUAL : Order
-
-def cmpInsert (cmp : α → α → Order) (x : α) (L : List α) : m (List α) :=
+def cmpInsert (cmp : α → α → Ordering) (x : α) (L : List α) : m (List α) :=
   match L with
   | [] => pure [x]
-  | y::xs => do let _ ← Step.step (1 : Nat)
+  | y::xs => do let _ ← step (1 : Nat)
                 let L' ← cmpInsert cmp x xs
                 pure (match cmp x y
-                      with | Order.LESS => x::y::xs
+                      with | Ordering.lt => x::y::xs
                            | _ => y::L')
 
-def inSort (cmp : α → α → Order) (L : List α) : m (List α) :=
+def inSort (cmp : α → α → Ordering) (L : List α) : m (List α) :=
   match L with
     | [] => pure []
     | x::xs => do
       let L' ← inSort cmp xs
-      let L'' ← (cmpInsert (α) cmp x L')
+      let L'' ← (cmpInsert cmp x L')
       pure (L'')
 
 
-theorem insertBound [LawfulMonad m] {α : Type} (cmp : α → α → Order) (x : α) (L : List α) :
+theorem insertBound [LawfulMonad m] (cmp : α → α → Ordering) (x : α) (L : List α) :
                     (∃ L' : List α, ∃ c : Nat, c ≤ (List.length L) ∧ List.length L' = List.length L + 1 ∧
-                    (cmpInsert (α) cmp x L : m (List α)) = Step.step c >>= fun _ => pure L') :=
+                    (cmpInsert cmp x L : m (List α)) = step c >>= fun _ => pure L') :=
 
   by induction L with
 
@@ -118,37 +112,37 @@ theorem insertBound [LawfulMonad m] {α : Type} (cmp : α → α → Order) (x :
            existsi [x] ; existsi 0;
            simp only [List.length_nil, List.length_cons];
            simp only [Nat.zero_le, true_and];
-           rw [Step.step_0, pure_bind];
+           rw [step_0, pure_bind];
 
   | cons y ys ih => simp only [cmpInsert] ;
                     rcases ih with ⟨L', c, hc⟩ ; rw [hc.right.right];
-                    match cmp x y with
-                    | Order.LESS =>   existsi x::y::ys, (c + 1);
-                                      simp only [List.length_cons, Nat.add_le_add_iff_right, hc.left, true_and];
-                                      simp only [pure_bind, bind_assoc, ← Step.step_add];
+                    cases cmp x y with
+                    | lt =>  existsi x::y::ys, (c + 1);
+                             simp only [List.length_cons, Nat.add_le_add_iff_right, hc.left, true_and];
+                             simp only [pure_bind, bind_assoc, ← step_add];
 
                     --Surely there is a way to get rid of all this boilerplate here for the following two cases
-                    | Order.GREATER => simp only [List.length_cons];
-                                       existsi y::L', (c + 1);
-                                       simp only [Nat.add_le_add_iff_right, hc.left, true_and];
-                                       simp only [pure_bind, bind_assoc, ← Step.step_add, List.length_cons];
-                                       rw [and_true]; rw [hc.right.left];
+                    | gt => simp only [List.length_cons];
+                            existsi y::L', (c + 1);
+                            simp only [Nat.add_le_add_iff_right, hc.left, true_and];
+                            simp only [pure_bind, bind_assoc, ← step_add, List.length_cons];
+                            rw [and_true]; rw [hc.right.left];
 
-                    | Order.EQUAL => simp only [List.length_cons];
-                                       existsi y::L', (c + 1);
-                                       simp only [Nat.add_le_add_iff_right, hc.left, true_and];
-                                       simp only [pure_bind, bind_assoc, ← Step.step_add, List.length_cons];
-                                       rw [and_true]; rw [hc.right.left];
+                    | eq => simp only [List.length_cons];
+                            existsi y::L', (c + 1);
+                            simp only [Nat.add_le_add_iff_right, hc.left, true_and];
+                            simp only [pure_bind, bind_assoc, ← step_add, List.length_cons];
+                            rw [and_true]; rw [hc.right.left];
 
 
-theorem inSortBound [LawfulMonad m] {α : Type} {cmp : α → α → Order} {L : List α} :
+theorem inSortBound [LawfulMonad m] {cmp : α → α → Ordering} {L : List α} :
                                     ( ∃ L' : List α, ∃ c : Nat, c ≤ (List.length L)*(List.length L) ∧ List.length L = List.length L'∧
-                                                    (inSort (α) cmp L : m (List α)) = Step.step c >>= fun _ => pure L') :=
+                                                    (inSort cmp L : m (List α)) = step c >>= fun _ => pure L') :=
   by induction L with
 
   | nil =>  existsi [];
             simp only [inSort, List.length_nil, Nat.mul_zero, Nat.le_zero_eq, exists_eq_left];
-            rw [Step.step_0, pure_bind, true_and];
+            rw [step_0, pure_bind, true_and];
 
   | cons y ys ih => simp only [inSort, List.length_cons];
                     rcases ih with ⟨L', c, h⟩; rw [h.right.right];
@@ -156,20 +150,20 @@ theorem inSortBound [LawfulMonad m] {α : Type} {cmp : α → α → Order} {L :
                     have h := insertBound (m := m) cmp y L' ;
                     rcases h with ⟨L1, c1, p⟩; rw [p.right.right];
                     existsi L1, (c1 + c);
-                    simp only [pure_bind, bind_assoc, ← Step.step_add, and_true];
+                    simp only [pure_bind, bind_assoc, ← step_add, and_true];
                     simp only [Nat.mul_add, Nat.add_mul, mul_one, one_mul];
                     omega;
 
 
-def merge (cmp : α → α → Order) (L : List α) (R : List α) : m (List α) :=
+def merge (cmp : α → α → Ordering) (L : List α) (R : List α) : m (List α) :=
   match L, R with
     | [], [] => pure ([])
     | x::xs, [] => pure (x::xs)
     | [], y::ys => pure (y::ys)
     | x::xs, y::ys => do
-                        let _ ← Step.step (1 : Nat)
+                        let _ ← step (1 : Nat)
                         match cmp x y with
-                          | Order.LESS =>
+                          | Ordering.lt =>
                             let M ← merge cmp (x::xs) ys
                             pure (y::M)
                           | _ =>
@@ -180,7 +174,7 @@ def merge (cmp : α → α → Order) (L : List α) (R : List α) : m (List α) 
 def first (L : List α) : m (List α) :=
   let n := List.length L ;
   let L' := List.take (n/2) L;
-  do let _ ← Step.step (0 : Nat)
+  do let _ ← step (0 : Nat)
      pure L'
 
 --Get the second half of the list
@@ -189,37 +183,37 @@ def last (L : List α) : m (List α) :=
   let L' := List.drop (n/2) L;
   pure L'
 
-meta def mSort (cmp : α → α → Order) (L : List α) : m (List α):=
+meta def mSort (cmp : α → α → Ordering) (L : List α) : m (List α):=
   match L with
     | [] => pure ([])
-    | _ => do let left ← first (α) L
-              let right ← last (α) L
+    | _ => do let left ← first L
+              let right ← last L
               let lsort ← (mSort cmp left)
               let rsort ← (mSort cmp right)
-              let merged ← (merge (α) cmp lsort rsort)
+              let merged ← (merge cmp lsort rsort)
               pure (merged)
 
-theorem mergeBound [LawfulMonad m] {a : Type} {cmp : α → α → Order} (L : List α) (R : List α) :
+theorem mergeBound [LawfulMonad m] {cmp : α → α → Ordering} (L : List α) (R : List α) :
                    (∃ L' : List α, ∃ c : Nat, c ≤ List.length L + List.length R ∧
-                   ((merge α cmp L R) : m (List α)) = Step.step c >>= fun _ => pure L') :=
+                   ((merge cmp L R) : m (List α)) = step c >>= fun _ => pure L') :=
 
   by induction L with
 
     | nil => (induction R with
                 | nil => simp only [List.length_nil, add_zero]
-                         existsi [], 0; simp only [merge, Step.step_0, pure_bind, and_true];
+                         existsi [], 0; simp only [merge, step_0, pure_bind, and_true];
                          omega
 
                 | cons y ys ih => rcases ih with ⟨L', h⟩;
                                   existsi (y::ys), 0;
-                                  simp only [List.length_nil, zero_add, merge, Step.step_0, pure_bind];
+                                  simp only [List.length_nil, zero_add, merge, step_0, pure_bind];
                                   simp only [List.length_cons, Nat.le_add_left, and_self]
                                   )
 
     | cons x xs ih => (induction R with
                         | nil => rcases ih with ⟨L', h⟩;
                                   existsi (x::xs), 0;
-                                  simp only [List.length_nil, merge, Step.step_0, pure_bind];
+                                  simp only [List.length_nil, merge, step_0, pure_bind];
                                   simp only [List.length_cons, Nat.le_add_left, and_self]
 
                         | cons y ys ih2 => sorry)
@@ -230,13 +224,13 @@ theorem mergeBound [LawfulMonad m] {a : Type} {cmp : α → α → Order} (L : L
 --todo : add some kind of other composition theorem for costs?
 
 -- def compose {α β γ : Type} (f : β → m γ) (g : α → m β) (x : α) : m γ :=
---                       do let _ ← Step.step 1
+--                       do let _ ← step 1
 --                          let res ← g x
 --                          let res' ← f res
 --                          pure (res')
 
--- theorem composeBound {x : α} (gbound : ∃ c_g : Nat, ∃ y : β, g x = Step.step c_g >>= fun _ => pure y)
---                              (fbound : ∃ c_f : Nat, ∃ z : γ, f (g x) = Step.step c_f >>= fun _ => pure z)
+-- theorem composeBound {x : α} (gbound : ∃ c_g : Nat, ∃ y : β, g x = step c_g >>= fun _ => pure y)
+--                              (fbound : ∃ c_f : Nat, ∃ z : γ, f (g x) = step c_f >>= fun _ => pure z)
 
 -- define classes wrt synthetic cost notion (think about more)
 
