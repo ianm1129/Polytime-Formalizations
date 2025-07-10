@@ -7,20 +7,28 @@ import Mathlib.Data.Real.Basic
 /-!
   # Monad Cost
 
-  This file defines the type class `MonadCost` for monads equipped with a cost function.
-  We also define the laws that a cost function must satisfy in the `LawfulMonadCost` type class.
+  This file defines the type class `MonadStep` for monads equipped with a cost / step function.
+  We also define the laws that a cost / step function must satisfy in the `LawfulMonadStep` type class.
 -/
 
 universe u v w
 
-class Step (C : Type*) [AddCommMonoid C] (m : Type u → Type v) extends Monad m where
+/-- A type class for monads with a step function. -/
+class MonadStep (C : outParam (Type w)) (m : Type u → Type v) where
   step : C → m PUnit
-  step_0 : step (0 : C) = (pure PUnit.unit : m PUnit)
-  step_add {c c'} : (step c >>= fun _ => step c') = step (c' + c)
 
-export Step (step step_0 step_add)
+export MonadStep (step)
 
--- define a preorder? on the monad based on the cost
+class LawfulMonadStep (C : outParam (Type w)) (m : Type u → Type v)
+    [AddMonoid C] [Monad m] [MonadStep C m] where
+  step_zero : step (0 : C) = (pure PUnit.unit : m PUnit)
+  step_add {c c' : C} : (step c >>= fun _ => step c') = (step (c' + c) : m PUnit)
+
+export LawfulMonadStep (step_zero step_add)
+
+attribute [simp] step_zero step_add
+
+-- define a preorder? on the monad based on the step
 -- so more step is larger
 
 -- class IsBounded
@@ -33,7 +41,7 @@ export Step (step step_0 step_add)
 -- - Higher-order functions
 -- - Oracle queries
 
--- We want `MonadCost` to be like `MonadState` `MonadReader` `MonadLift` etc
+-- We want `MonadStep` to be like `MonadState` `MonadReader` `MonadLift` etc
 -- #check LawfulMonadLift
 
 #check MonadState
@@ -50,21 +58,6 @@ class MonadBranch (m : Type u → Type v) where
 class MonadProb (m : Type u → Type v) where
   flip {α} : Set.Icc (0 : Rat) 1 → m α → m α → m α
 
-/-- A type class for monads with a cost function. -/
-class MonadCost (C : outParam (Type w)) (m : Type u → Type v) where
-  cost : C → m PUnit
-
-export MonadCost (cost)
-
-class LawfulMonadCost (C : outParam (Type w)) (m : Type u → Type v)
-    [AddMonoid C] [Monad m] [MonadCost C m] where
-  cost_zero : cost (0 : C) = (pure PUnit.unit : m PUnit)
-  cost_add {c c' : C} : (cost c >>= fun _ => cost c') = (cost (c' + c) : m PUnit)
-
-export LawfulMonadCost (cost_zero cost_add)
-
-attribute [simp] cost_zero cost_add
-
 /-- A type class for monads that may call an oracle, specified by a `PFunctor`. -/
 class MonadOracle (P : PFunctor) (m : Type u → Type v) where
   oracle : (a : P.A) → m (P.B a)
@@ -76,7 +69,7 @@ class MonadOracle (P : PFunctor) (m : Type u → Type v) where
 --     (m : Type u → Type v) extends Monad m, Step C m where
 --   oracle : (a : P.A) → m (P.B a)
 
-variable {P : PFunctor} {m : Type → Type} [Step Nat m]
+variable {P : PFunctor} {m : Type → Type} [Monad m] [MonadStep Nat m] [LawfulMonadStep Nat m]
 
 def idHard (n : Nat) : m Nat :=
   match n with
@@ -88,7 +81,7 @@ def idHard (n : Nat) : m Nat :=
 
 theorem idHardBound [LawfulMonad m] {n : Nat} : (idHard n : m Nat) = step n >>= fun _ => pure n :=
   by induction n with
-  | zero => simp only [idHard] ; rw [step_0, pure_bind];
+  | zero => simp only [idHard] ; rw [step_zero, pure_bind];
   | succ n ih => simp only [ih, idHard, bind_assoc, pure_bind] ;
                  rw [← bind_assoc, step_add];
 
@@ -103,7 +96,7 @@ def fact (n : Nat) : m Nat :=
 
 theorem factBound [LawfulMonad m] {n : Nat} : ∃ (z : Nat), ( fact n : m Nat) = step n >>= fun _ => pure z :=
   by induction n with
-  | zero => simp only [fact] ; rw [step_0] ; existsi 1; rw [pure_bind]
+  | zero => simp only [fact] ; rw [step_zero] ; existsi 1; rw [pure_bind]
   | succ n ih =>
       simp only [fact];
       rcases ih with ⟨z, hz⟩; rw [hz];
@@ -140,7 +133,7 @@ theorem insertBound [LawfulMonad m] (cmp : α → α → Ordering) (x : α) (L :
            existsi [x] ; existsi 0;
            simp only [List.length_nil, List.length_cons];
            simp only [Nat.zero_le, true_and];
-           rw [step_0, pure_bind];
+           rw [step_zero, pure_bind];
 
   | cons y ys ih => simp only [cmpInsert] ;
                     rcases ih with ⟨L', c, hc⟩ ; rw [hc.right.right];
@@ -169,7 +162,7 @@ theorem inSortBound [LawfulMonad m] {cmp : α → α → Ordering} {L : List α}
 
   | nil =>  existsi [];
             simp only [inSort, List.length_nil, Nat.mul_zero, Nat.le_zero_eq, exists_eq_left];
-            rw [step_0, pure_bind, true_and];
+            rw [step_zero, pure_bind, true_and];
 
   | cons y ys ih => simp only [inSort, List.length_cons];
                     rcases ih with ⟨L', c, h⟩; rw [h.right.right];
@@ -209,17 +202,27 @@ def merge (cmp : α → α → m Ordering) (L : List α) (R : List α) : m (List
 --   let L' := List.drop (n/2) L;
 --   pure L'
 
+/-- Splitting a list into two halves, together with a proof that the halves are less than the
+  original list, assuming the list has at least two elements. -/
+def List.splitHalfAtLeastTwo (L : List α) (h : L.length ≥ 2) :
+    {left : List α // left.length < L.length} × {right : List α // right.length < L.length} := by
+  let halves := L.splitAt (L.length / 2)
+  refine ⟨⟨halves.1, ?_⟩, ⟨halves.2, ?_⟩⟩
+  all_goals simp [halves]; omega
+
 def mSort (cmp : α → α → m Ordering) (L : List α) : m (List α) :=
-  match L with
+  match h : L with
     | [] => pure ([])
-    | _ => do let half := L.length / 2
-              let ⟨left, right⟩ := L.splitAt half
-              let lsort ← (mSort cmp left)
-              let rsort ← (mSort cmp right)
-              let merged ← (merge cmp lsort rsort)
-              pure (merged)
+    | [x] => pure [x]
+    | x :: y :: _ => do
+      let ⟨⟨left, h1⟩, ⟨right, h2⟩⟩ := L.splitHalfAtLeastTwo (by simp [h])
+      let lsort ← (mSort cmp left)
+      let rsort ← (mSort cmp right)
+      merge cmp lsort rsort
 termination_by L.length
-decreasing_by sorry; sorry
+decreasing_by
+  · simp [← h, h1]
+  · simp [← h, h2]
 
 theorem mergeBound [LawfulMonad m] {cmp : α → α → m Ordering} (L : List α) (R : List α) :
                    (∃ L' : List α, ∃ c : Nat, c ≤ List.length L + List.length R ∧
@@ -229,27 +232,27 @@ theorem mergeBound [LawfulMonad m] {cmp : α → α → m Ordering} (L : List α
 
     | nil => (induction R with
                 | nil => simp only [List.length_nil, add_zero]
-                         existsi [], 0; simp only [merge, step_0, pure_bind, and_true];
+                         existsi [], 0; simp only [merge, step_zero, pure_bind, and_true];
                          omega
 
                 | cons y ys ih => rcases ih with ⟨L', h⟩;
                                   existsi (y::ys), 0;
-                                  simp only [List.length_nil, zero_add, merge, step_0, pure_bind];
+                                  simp only [List.length_nil, zero_add, merge, step_zero, pure_bind];
                                   simp only [List.length_cons, Nat.le_add_left, and_self]
                                   )
 
     | cons x xs ih => (induction R with
                         | nil => rcases ih with ⟨L', h⟩;
                                   existsi (x::xs), 0;
-                                  simp only [List.length_nil, merge, step_0, pure_bind];
+                                  simp only [List.length_nil, merge, step_zero, pure_bind];
                                   simp only [List.length_cons, Nat.le_add_left, and_self]
 
                         | cons y ys ih2 => sorry)
 
 
---Goals: implement functions with this monad, instrument with cost, prove bounds
+--Goals: implement functions with this monad, instrument with step, prove bounds
 
---todo : add some kind of other composition theorem for costs?
+--todo : add some kind of other composition theorem for steps?
 
 -- def compose {α β γ : Type} (f : β → m γ) (g : α → m β) (x : α) : m γ :=
 --                       do let _ ← step 1
@@ -260,7 +263,7 @@ theorem mergeBound [LawfulMonad m] {cmp : α → α → m Ordering} (L : List α
 -- theorem composeBound {x : α} (gbound : ∃ c_g : Nat, ∃ y : β, g x = step c_g >>= fun _ => pure y)
 --                              (fbound : ∃ c_f : Nat, ∃ z : γ, f (g x) = step c_f >>= fun _ => pure z)
 
--- define classes wrt synthetic cost notion (think about more)
+-- define classes wrt synthetic step notion (think about more)
 
 -- instrument with oracle computation framework
 
