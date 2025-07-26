@@ -20,9 +20,12 @@ class MonadStep (C : outParam (Type w)) (m : Type u → Type v) where
 export MonadStep (step)
 
 class LawfulMonadStep (C : outParam (Type w)) (m : Type u → Type v)
-    [AddMonoid C] [Monad m] [MonadStep C m] where
+    [AddMonoid C] [Preorder C] [Monad m] [MonadStep C m] where
   step_zero : step (0 : C) = (pure PUnit.unit : m PUnit)
   step_add {c c' : C} : (step c >>= fun _ => step c') = (step (c' + c) : m PUnit)
+
+  -- make this c + c', possibly add commutativity for step
+  -- also maybe add applicative version of step? So that don't need so many binds
 
 export LawfulMonadStep (step_zero step_add)
 
@@ -31,8 +34,23 @@ attribute [simp] step_zero step_add
 -- define a preorder? on the monad based on the step
 -- so more step is larger
 
+
 -- class IsBounded
 -- or `HasCost`
+
+-- class HasCost {C : outParam (Type w)} {m : Type u → Type v} {α : Type u} {β : Type u}
+--     (f : α → m β) (cost : C) [AddMonoid C] where
+
+--Easier to do with def than class, turns out
+
+def HasCost {C : outParam (Type w)} {m : Type u → Type v} {α : Type u}
+    (e : m α) (cost : C) [AddMonoid C] [Monad m] [MonadStep C m] : Prop :=
+    (e >>= fun _ => pure PUnit.unit : m PUnit) = step cost
+
+
+def IsBounded {C : outParam (Type w)} {m : Type u → Type v} {α : Type u}
+    (e : m α) (cost : C) [LE C] [AddMonoid C] [Monad m] [MonadStep C m] : Prop :=
+    ∃ cost', cost' ≤ cost ∧ (HasCost e cost')
 
 -- More effects:
 -- - State
@@ -47,16 +65,61 @@ attribute [simp] step_zero step_add
 #check MonadState
 #check LawfulMonadState
 
+class MonadStateStep (C C' : outParam (Type u)) (m : Type u → Type v)
+                       [Monad m] [AddMonoid C'] [Preorder C'] [MonadStep C' m] [LawfulMonadStep C' m]
+                       extends LawfulMonadState C m where
+
+  -- get_step {cost : C'}
+
+--want get_step and set_step, probably need a MonadStep here somewhere.
+
 -- or `MonadNonDet`
-class MonadBranch (m : Type u → Type v) where
+class MonadBranch (m : Type u → Type v) extends Monad m where
   branch {α : Type u} : m α → m α → m α
+  fail {α} : m α
+  branch_ID1 {α} {e : m α} : branch fail e = e
+  branch_ID2 {α} {e : m α} : branch e fail = e
+  branch_Assoc {α} {e0 e1 e2 : m α} : branch (branch e0 e1) e2 = branch e0 (branch e1 e2)
+  branch_Comm {α} {e0 e1 : m α} : branch e0 e1 = branch e1 e0
+  branch_Idem {α} {e : m α} : branch e e = e
+
+class MonadBranchStep (C : outParam (Type w)) (m : Type u → Type v) [Monad m]
+                      [AddMonoid C] [Preorder C] [MonadStep C m] [LawfulMonadStep C m]
+                      extends MonadBranch m where
+
+  branch_step {α} {c : C} {e0 e1 : m α} : (step c >>= fun _ => branch e0 e1) =
+                          branch (step c >>= fun _ => e0) (step c >>= fun _ => e1)
+
+  -- fail_step {α} {c : C} : (step c >>= fun _ => fail) = fail
+
+
+
+
 
 #check AlternativeMonad
 
 -- #check unitInterval
 
-class MonadProb (m : Type u → Type v) where
-  flip {α} : Set.Icc (0 : Rat) 1 → m α → m α → m α
+class MonadProb (m : Type u → Type v) extends Monad m where
+  flip {α} : (Set.Icc (0 : Rat) 1) → m α → m α → m α
+  flip_0 {α} {e0 e1 : m α} : flip ⟨0, by simp⟩ e0 e1 = e0
+  flip_1 {α} {e0 e1 : m α} : flip ⟨1, by simp⟩ e0 e1 = e1
+  flip_Same {α} {e : m α} {p : Set.Icc 0 1} : flip p e e = e
+
+  flip_Sym {α} {e0 e1 : m α} {p : Set.Icc 0 1} : flip p e0 e1 = flip ⟨1 - p, by simp; rw [and_comm]; exact p.prop⟩ e1 e0
+
+  -- bindFlip {α} {β} {f : α → β} {c : Set.Icc 0 1} {e0 e1 : m α} :
+  --         pure (flip c e0 e1) >>= f = flip c (pure e0 >>= f) (pure e1 >>= f)
+
+
+class MonadProbStep (C : outParam (Type w)) (m : Type u → Type v) [Monad m]
+                      [AddMonoid C] [Preorder C] [MonadStep C m] [LawfulMonadStep C m]
+                      extends MonadProb m where
+
+  flip_step {α} {c : C} {p : Set.Icc 0 1} {e0 e1 : m α} : (step c >>= fun _ => flip p e0 e1) =
+                                                           flip p (step c >>= fun _ => e0) (step c >>= fun _ => e1)
+
+
 
 /-- A type class for monads that may call an oracle, specified by a `PFunctor`. -/
 class MonadOracle (P : PFunctor) (m : Type u → Type v) where
@@ -83,7 +146,7 @@ theorem idHardBound [LawfulMonad m] {n : Nat} : (idHard n : m Nat) = step n >>= 
   by induction n with
   | zero => simp only [idHard] ; rw [step_zero, pure_bind];
   | succ n ih => simp only [ih, idHard, bind_assoc, pure_bind] ;
-                 rw [← bind_assoc, step_add];
+                 rw [← bind_assoc, step_add, add_comm];
 
 
 def fact (n : Nat) : m Nat :=
@@ -154,6 +217,12 @@ theorem insertBound [LawfulMonad m] (cmp : α → α → Ordering) (x : α) (L :
                             simp only [Nat.add_le_add_iff_right, hc.left, true_and];
                             simp only [pure_bind, bind_assoc, ← step_add, List.length_cons];
                             rw [and_true]; rw [hc.right.left];
+
+-- theorem insertCost [LawfulMonad m] [LawfulMonadStep Nat m] (cmp : α → α → Ordering) (x : α) (L : List α) :
+--                      IsBounded (cmpInsert cmp x L) (List.length L) :=
+--                      by have h := insertBound cmp x L
+
+
 
 theorem inSortBound [LawfulMonad m] {cmp : α → α → Ordering} {L : List α} :
                                     ( ∃ L' : List α, ∃ c : Nat, c ≤ (List.length L)*(List.length L) ∧ List.length L = List.length L'∧
@@ -247,7 +316,8 @@ theorem mergeBound [LawfulMonad m] {cmp : α → α → m Ordering} (L : List α
                                   simp only [List.length_nil, merge, step_zero, pure_bind];
                                   simp only [List.length_cons, Nat.le_add_left, and_self]
 
-                        | cons y ys ih2 => sorry)
+                        | cons y ys ih2 => sorry
+                        )
 
 
 --Goals: implement functions with this monad, instrument with step, prove bounds
