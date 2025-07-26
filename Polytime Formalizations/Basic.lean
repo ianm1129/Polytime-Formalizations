@@ -3,6 +3,7 @@ import Mathlib.Algebra.Order.Monoid.Basic
 import ToMathlib.Control.Lawful.MonadState
 import ToMathlib.Control.AlternativeMonad
 import Mathlib.Data.Real.Basic
+import VCVio
 
 /-!
   # Monad Cost
@@ -16,6 +17,10 @@ universe u v w
 /-- A type class for monads with a step function. -/
 class MonadStep (C : outParam (Type w)) (m : Type u → Type v) where
   step : C → m PUnit
+
+-- agda-step : C → m α → m α
+
+-- step c ma = do step c; ma = step c >>= fun _
 
 export MonadStep (step)
 
@@ -65,72 +70,98 @@ def IsBounded {C : outParam (Type w)} {m : Type u → Type v} {α : Type u}
 #check MonadState
 #check LawfulMonadState
 
-class MonadStateStep (C C' : outParam (Type u)) (m : Type u → Type v)
-                       [Monad m] [AddMonoid C'] [Preorder C'] [MonadStep C' m] [LawfulMonadStep C' m]
-                       extends LawfulMonadState C m where
+class MonadStateStep (σ : outParam (Type u)) (C : Type*) (m : Type u → Type v)
+    [Monad m] [AddMonoid C] [Preorder C] [MonadStep C m] [LawfulMonadStep C m]
+    extends LawfulMonadState σ m where
+  /-- `get` is free, so `step` can be moved past it. -/
+  get_step {cost : C} :
+    (do step cost; get) = (do let s ← get; step cost; return s)
+  /-- `set` is free, so it commutes with `step`. -/
+  set_step {cost : C} {s : σ} :
+    (do step cost; set s) = (do set s; step cost)
 
-  -- get_step {cost : C'}
+-- The standard `get` and `set` from `MonadState` are:
+-- get : m σ
+-- set : σ → m PUnit
 
---want get_step and set_step, probably need a MonadStep here somewhere.
+-- The "Agda-style" `get` and `set` are continuation-based:
+-- agda_get : (σ → m α) → m α
+-- agda_set : σ → m α → m α
+
+-- Here is how you can translate between them.
+-- agda_get e := do let s ← get; e s
+-- agda_set s e := do let x ← e s; set s; return x
 
 -- or `MonadNonDet`
 class MonadBranch (m : Type u → Type v) extends Monad m where
   branch {α : Type u} : m α → m α → m α
-  fail {α} : m α
-  branch_ID1 {α} {e : m α} : branch fail e = e
-  branch_ID2 {α} {e : m α} : branch e fail = e
-  branch_Assoc {α} {e0 e1 e2 : m α} : branch (branch e0 e1) e2 = branch e0 (branch e1 e2)
-  branch_Comm {α} {e0 e1 : m α} : branch e0 e1 = branch e1 e0
-  branch_Idem {α} {e : m α} : branch e e = e
 
-class MonadBranchStep (C : outParam (Type w)) (m : Type u → Type v) [Monad m]
+export MonadBranch (branch)
+
+class AlternativeMonadBranch (m : Type u → Type v) extends AlternativeMonad m, MonadBranch m where
+
+class LawfulMonadBranch (m : Type u → Type v) [Monad m] [MonadBranch m] where
+  branch_assoc {α} {e0 e1 e2 : m α} : branch (branch e0 e1) e2 = branch e0 (branch e1 e2)
+  branch_comm {α} {e0 e1 : m α} : branch e0 e1 = branch e1 e0
+  branch_idem {α} {e : m α} : branch e e = e
+
+class LawfulAlternativeMonadBranch (m : Type u → Type v) [AlternativeMonadBranch m] where
+  branch_fail_left {α} : branch (failure : m α) = id
+  branch_fail_right {α} : (branch · (failure : m α)) = id
+
+class LawfulMonadBranchStep (C : outParam (Type w)) (m : Type u → Type v) [Monad m]
                       [AddMonoid C] [Preorder C] [MonadStep C m] [LawfulMonadStep C m]
-                      extends MonadBranch m where
+                      [MonadBranch m] extends LawfulMonadBranch m where
 
-  branch_step {α} {c : C} {e0 e1 : m α} : (step c >>= fun _ => branch e0 e1) =
-                          branch (step c >>= fun _ => e0) (step c >>= fun _ => e1)
+  branch_step {α} {c : C} {e0 e1 : m α} :
+    (do step c; branch e0 e1) = branch (do step c; e0) (do step c; e1)
 
-  -- fail_step {α} {c : C} : (step c >>= fun _ => fail) = fail
-
-
-
-
-
-#check AlternativeMonad
-
--- #check unitInterval
+class LawfulAlternativeMonadStep (C : outParam (Type w)) (m : Type u → Type v) [AlternativeMonad m]
+                      [AddMonoid C] [Preorder C] [MonadStep C m] [LawfulMonadStep C m]
+                      extends LawfulAlternative m where
+  fail_step {α} {c : C} : (do step c; failure) = (failure : m α)
 
 class MonadProb (m : Type u → Type v) extends Monad m where
   flip {α} : (Set.Icc (0 : Rat) 1) → m α → m α → m α
-  flip_0 {α} {e0 e1 : m α} : flip ⟨0, by simp⟩ e0 e1 = e0
-  flip_1 {α} {e0 e1 : m α} : flip ⟨1, by simp⟩ e0 e1 = e1
-  flip_Same {α} {e : m α} {p : Set.Icc 0 1} : flip p e e = e
 
-  flip_Sym {α} {e0 e1 : m α} {p : Set.Icc 0 1} : flip p e0 e1 = flip ⟨1 - p, by simp; rw [and_comm]; exact p.prop⟩ e1 e0
+  flip_zero {α} {e0 e1 : m α} : flip ⟨0, by simp⟩ e0 e1 = e0
+  flip_one {α} {e0 e1 : m α} : flip ⟨1, by simp⟩ e0 e1 = e1
 
-  -- bindFlip {α} {β} {f : α → β} {c : Set.Icc 0 1} {e0 e1 : m α} :
-  --         pure (flip c e0 e1) >>= f = flip c (pure e0 >>= f) (pure e1 >>= f)
+  flip_same {α} {e : m α} {p : Set.Icc 0 1} : flip p e e = e
 
+  flip_sym {α} {e0 e1 : m α} {p : Set.Icc 0 1} :
+    flip p e0 e1 = flip ⟨1 - p, by simp; exact p.prop.symm⟩ e1 e0
+
+  flip_assoc_right {α} {e₀ e₁ e₂ : m α} {p q r : Set.Icc 0 1} (h : p = min (max p q) r) :
+    flip p (flip q e₀ e₁) e₂ = flip (max p q) e₀ (flip r e₁ e₂)
+
+  flip_assoc_left {α} {e₀ e₁ e₂ : m α} {p q r : Set.Icc 0 1} (h : p = max (min p q) r) :
+    flip p e₀ (flip q e₁ e₂) = flip (min p q) (flip r e₀ e₁) e₂
+
+  flip_bind {α} {β} {f : α → m β} {p : Set.Icc 0 1} {e0 e1 : m α} :
+          (flip p e0 e1 >>= f) = flip p (e0 >>= f) (e1 >>= f)
+
+-- TODO: refactor hierarchy
 
 class MonadProbStep (C : outParam (Type w)) (m : Type u → Type v) [Monad m]
                       [AddMonoid C] [Preorder C] [MonadStep C m] [LawfulMonadStep C m]
                       extends MonadProb m where
-
-  flip_step {α} {c : C} {p : Set.Icc 0 1} {e0 e1 : m α} : (step c >>= fun _ => flip p e0 e1) =
-                                                           flip p (step c >>= fun _ => e0) (step c >>= fun _ => e1)
-
-
+  flip_step {α} {c : C} {p : Set.Icc 0 1} {e0 e1 : m α} :
+    (do step c; flip p e0 e1) = flip p (do step c; e0) (do step c; e1)
 
 /-- A type class for monads that may call an oracle, specified by a `PFunctor`. -/
-class MonadOracle (P : PFunctor) (m : Type u → Type v) where
-  oracle : (a : P.A) → m (P.B a)
+class MonadOracle (P : PFunctor) (m : Type u → Type v) extends Monad m where
+  query : (a : P.A) → m (P.B a)
 
--- What laws should we have for `MonadOracle`?
--- class LawfulMonadOracle (P : PFunctor) (m : Type u → Type v) [Monad m] [MonadOracle P m] where
+open MonadOracle in
+class LawfulMonadOracleStep (C : outParam (Type w)) (P : PFunctor) (m : Type u → Type v)
+                      [MonadOracle P m] [AddMonoid C] [Preorder C] [MonadStep C m]
+                      [LawfulMonadStep C m] where
+  query_step {c : C} {a : P.A} :
+    (do step c; query a : m (P.B a)) = (do let x ← query a; step c; return x)
 
--- class OracleCompLike (C : Type*) [AddMonoid C] (P : PFunctor)
---     (m : Type u → Type v) extends Monad m, Step C m where
---   oracle : (a : P.A) → m (P.B a)
+#check FreeMonad.mapM
+#check OracleComp.mapM
 
 variable {P : PFunctor} {m : Type → Type} [Monad m] [MonadStep Nat m] [LawfulMonadStep Nat m]
 
@@ -218,9 +249,9 @@ theorem insertBound [LawfulMonad m] (cmp : α → α → Ordering) (x : α) (L :
                             simp only [pure_bind, bind_assoc, ← step_add, List.length_cons];
                             rw [and_true]; rw [hc.right.left];
 
--- theorem insertCost [LawfulMonad m] [LawfulMonadStep Nat m] (cmp : α → α → Ordering) (x : α) (L : List α) :
---                      IsBounded (cmpInsert cmp x L) (List.length L) :=
---                      by have h := insertBound cmp x L
+theorem insertCost [LawfulMonad m] [LawfulMonadStep Nat m] (cmp : α → α → Ordering) (x : α) (L : List α) :
+                     IsBounded (m := m) (cmpInsert cmp x L) (List.length L) := sorry
+                    --  by have h := insertBound cmp x L
 
 
 
