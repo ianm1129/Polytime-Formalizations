@@ -40,14 +40,6 @@ attribute [simp] step_zero step_add
 -- so more step is larger
 
 
--- class IsBounded
--- or `HasCost`
-
--- class HasCost {C : outParam (Type w)} {m : Type u → Type v} {α : Type u} {β : Type u}
---     (f : α → m β) (cost : C) [AddMonoid C] where
-
---Easier to do with def than class, turns out
-
 def HasCost {C : outParam (Type w)} {m : Type u → Type v} {α : Type u}
     (e : m α) (cost : C) [AddMonoid C] [Monad m] [MonadStep C m] : Prop :=
     (e >>= fun _ => pure PUnit.unit : m PUnit) = step cost
@@ -160,7 +152,13 @@ class LawfulMonadOracleStep (C : outParam (Type w)) (P : PFunctor) (m : Type u �
   query_step {c : C} {a : P.A} :
     (do step c; query a : m (P.B a)) = (do let x ← query a; step c; return x)
 
+  -- Want a way to seperate concrete and abstract cost:
+  -- perhaps can use the freeMonad.mapM to as a way of letting the user pick such costs?
+  --
+
+
 #check FreeMonad.mapM
+#print FreeMonad.mapM
 #check OracleComp.mapM
 
 variable {P : PFunctor} {m : Type → Type} [Monad m] [MonadStep Nat m] [LawfulMonadStep Nat m]
@@ -249,13 +247,15 @@ theorem insertBound [LawfulMonad m] (cmp : α → α → Ordering) (x : α) (L :
                             simp only [pure_bind, bind_assoc, ← step_add, List.length_cons];
                             rw [and_true]; rw [hc.right.left];
 
-theorem insertCost [LawfulMonad m] [LawfulMonadStep Nat m] (cmp : α → α → Ordering) (x : α) (L : List α) :
-                     IsBounded (m := m) (cmpInsert cmp x L) (List.length L) := sorry
-                    --  by have h := insertBound cmp x L
+theorem insertCost [LawfulMonad m] (cmp : α → α → Ordering) (x : α) (L : List α) :
+                     IsBounded (m := m) (cmpInsert cmp x L) (List.length L) :=
+                     by have h := insertBound (m := m) cmp x L ; rcases h with ⟨L', c, hc⟩;
+                        (have g : HasCost (m := m) (cmpInsert cmp x L) c := by unfold HasCost;
+                                                                               rw [hc.right.right]; simp);
+                        unfold IsBounded; existsi c; exact ⟨hc.left, g⟩
 
 
-
-theorem inSortBound [LawfulMonad m] {cmp : α → α → Ordering} {L : List α} :
+theorem inSortBound [LawfulMonad m] (cmp : α → α → Ordering) (L : List α) :
                                     ( ∃ L' : List α, ∃ c : Nat, c ≤ (List.length L)*(List.length L) ∧ List.length L = List.length L'∧
                                                     (inSort cmp L : m (List α)) = step c >>= fun _ => pure L') :=
   by induction L with
@@ -273,6 +273,13 @@ theorem inSortBound [LawfulMonad m] {cmp : α → α → Ordering} {L : List α}
                     simp only [pure_bind, bind_assoc, ← step_add, and_true];
                     simp only [Nat.mul_add, Nat.add_mul, mul_one, one_mul];
                     omega;
+
+theorem inSortCost [LawfulMonad m] (cmp : α → α → Ordering) (L : List α) :
+                     IsBounded (m := m) (inSort cmp L) (List.length L*List.length L) :=
+                     by have h := inSortBound (m := m) cmp L ; rcases h with ⟨L', c, hc⟩;
+                        (have g : HasCost (m := m) (inSort cmp L) c := by unfold HasCost;
+                                                                               rw [hc.right.right]; simp);
+                        unfold IsBounded; existsi c; exact ⟨hc.left, g⟩
 
 
 def merge (cmp : α → α → m Ordering) (L : List α) (R : List α) : m (List α) :=
@@ -372,3 +379,9 @@ theorem mergeBound [LawfulMonad m] {cmp : α → α → m Ordering} (L : List α
 
 -- TODO: Implement mergeSort with proper termination proof
 -- This would require more complex termination arguments than the simple examples above
+
+
+-- PAPER REVIEW:
+-- Want adversary defined as a free monad, look at intrinsic cost.
+-- Particularly, stare at trapdoor permutation example for longer
+-- oracles: H, A.choose, A.guess

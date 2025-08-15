@@ -5,7 +5,12 @@ import VCVio
  Formalizing cost of procedure calls
 -/
 
+#check OracleComp
+#check OracleSpec
+
 open OracleComp OracleSpec
+
+universe u
 
 /- Define procedure A -/
 
@@ -40,3 +45,31 @@ variable [MonadStep Nat (OracleComp specForCallBAndC)]
 
 -- the cost of the orchestrator is at most
 -- (cost of `procA`) + (cost of `procB`) * (number of calls from `procA` to `procB`) + (cost of `procC`) * (number of calls from `procA` to `procC` + number of calls from `procB` to `procC`)
+
+--   def countQueriesToAux {n : Nat} {β} (i : Fin n) : OracleComp (fun _ => (Unit, Unit)) β → Nat
+
+
+
+--     -- | .pure _ => 0
+--     -- -- | .step _ k => countQueriesToAux i (k ())
+--     -- | j _ k =>
+--     --   let rest := countQueriesToAux i (k ())
+--     --   if j = i then rest + 1 else rest
+--     -- | .bind x f => countQueriesToBind i x f
+
+--   def countQueriesToBind {n : Nat} {β} {γ} (i : Fin n) : OracleComp (fun _ => (Unit, Unit)) β → (β → OracleComp _ γ) → Nat
+--     | .pure a, f => countQueriesToAux i (f a)
+--     -- | .step _ k, f => countQueriesToBind i (k ()) f
+--     | .query j _ k, f =>
+--       let rest := countQueriesToBind i (k ()) f
+--       if j = i then rest + 1 else rest
+--     | .bind x g, f => countQueriesToBind i x (fun a => countQueriesToBind i (g a) f)
+-- end
+
+def countQueriesTo {α : Type} {n : Nat} (i : Fin n) (comp : OracleComp (fun _ : Unit => (Unit, Unit)) α) : Nat :=
+  by
+    induction comp using OracleComp.construct
+
+
+lemma orchestrator_cost (procA : OracleComp specForCallBAndC Unit) (procB : OracleComp specForCallC Unit) (a b c : Nat) :
+      (IsBounded procA a) → (IsBounded procB b) →
